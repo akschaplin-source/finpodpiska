@@ -35,10 +35,12 @@ import com.google.mlkit.vision.text.TextRecognition
 import com.google.mlkit.vision.text.latin.TextRecognizerOptions
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.tasks.await
+import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
 import java.util.*
+import kotlin.coroutines.resume
+import kotlin.coroutines.resumeWithException
 
 // ===== ENUMS =====
 
@@ -166,13 +168,25 @@ abstract class DB : RoomDatabase() {
     }
 }
 
-// ===== OCR =====
+// ===== OCR (без .await()) =====
 
 object OcrHelper {
     private val rec = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
-    suspend fun scan(ctx: Context, uri: Uri): String = try {
-        rec.process(InputImage.fromFilePath(ctx, uri)).await().text
-    } catch (e: Exception) { "" }
+    
+    suspend fun scan(ctx: Context, uri: Uri): String = suspendCancellableCoroutine { cont ->
+        try {
+            val image = InputImage.fromFilePath(ctx, uri)
+            rec.process(image)
+                .addOnSuccessListener { result ->
+                    if (cont.isActive) cont.resume(result.text)
+                }
+                .addOnFailureListener { e ->
+                    if (cont.isActive) cont.resumeWithException(e)
+                }
+        } catch (e: Exception) {
+            if (cont.isActive) cont.resumeWithException(e)
+        }
+    }
 
     data class Parsed(val name: String, val amount: Double?, val card: String?, val date: Long?, val category: String, val currency: String, val period: String)
 
