@@ -33,9 +33,9 @@
         </com.google.android.material.textfield.TextInputLayout>
         <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Приоритет" android:layout_marginTop="12dp" android:textSize="12sp"/>
         <com.google.android.material.button.MaterialButtonToggleGroup android:id="@+id/toggle_prio" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="4dp" app:singleSelection="true" app:selectionRequired="true">
-            <com.google.android.material.button.MaterialButton android:id="@+id/btn_must" style="?attr/materialButtonOutlinedStyle" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="🔴"/>
-            <com.google.android.material.button.MaterialButton android:id="@+id/btn_nice" style="?attr/materialButtonOutlinedStyle" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="🟡"/>
-            <com.google.android.material.button.MaterialButton android:id="@+id/btn_cancel" style="?attr/materialButtonOutlinedStyle" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="🟢"/>
+<com.google.android.material.button.MaterialButton android:id="@+id/btn_must" ... android:text="🔴"/>
+<com.google.android.material.button.MaterialButton android:id="@+id/btn_nice" ... android:text="🟡"/>
+<com.google.android.material.button.MaterialButton android:id="@+id/btn_cancel" ... android:text="🟢"/>
         </com.google.android.material.button.MaterialButtonToggleGroup>
         <com.google.android.material.textfield.TextInputLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8dp" android:hint="URL">
             <com.google.android.material.textfield.TextInputEditText android:id="@+id/et_url" android:layout_width="match_parent" android:layout_height="wrap_content" android:inputType="textUri"/>
