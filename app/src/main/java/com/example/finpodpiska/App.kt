@@ -10,6 +10,7 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.widget.*
@@ -203,14 +204,12 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         
-        // Создаём UI программно — никаких XML проблем
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
             setBackgroundColor(0xFFF5F5F5.toInt())
         }
 
-        // Заголовок
         val title = TextView(this).apply {
             text = "💰 ФинПодписка"
             textSize = 24f
@@ -218,7 +217,6 @@ class MainActivity : AppCompatActivity() {
         }
         root.addView(title)
 
-        // Итоги
         val summaryCard = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setBackgroundColor(0xFF1976D2.toInt())
@@ -235,7 +233,6 @@ class MainActivity : AppCompatActivity() {
         summaryCard.addView(tvCount)
         root.addView(summaryCard)
 
-        // Кнопки
         val btnRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
@@ -248,7 +245,6 @@ class MainActivity : AppCompatActivity() {
         btnRow.addView(btnScan)
         root.addView(btnRow)
 
-        // Список
         val tvLabel = TextView(this).apply { text = "Подписки:"; textSize = 18f; setPadding(48, 16, 48, 16) }
         root.addView(tvLabel)
 
@@ -262,7 +258,6 @@ class MainActivity : AppCompatActivity() {
 
         setContentView(root)
 
-        // Данные
         createNotificationChannel()
 
         db.subDao().totalMonthly().observe(this) { total -> tvTotal.text = "${"%.0f".format(total ?: 0.0)} ₽/мес" }
