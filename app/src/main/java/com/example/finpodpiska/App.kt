@@ -7,12 +7,10 @@ import android.app.PendingIntent
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
-import android.graphics.Color
-import android.graphics.Typeface
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
-import android.view.Gravity
+import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.widget.*
@@ -31,12 +29,13 @@ import com.github.mikephil.charting.charts.BarChart
 import com.github.mikephil.charting.charts.PieChart
 import com.github.mikephil.charting.data.*
 import com.github.mikephil.charting.utils.ColorTemplate
+import com.google.android.material.floatingactionbutton.FloatingActionButton
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.text.TextRecognition
 import com.google.mlkit.vision.text.latin.TextRecognizerOptions
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
 import java.util.*
@@ -232,7 +231,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var fabScan: FloatingActionButton
 
     private val subAdapter = SubAdapter(onEdit = { sub: Sub -> showSubDialog(sub) }, onDelete = { sub: Sub -> deleteSub(sub) })
-    private val expAdapter = ExpAdapter(onDelete = { exp: Expense -> db.expDao().delete(exp) })
+    private val expAdapter = ExpAdapter(onDelete = { exp: Expense -> deleteExpense(exp) })
 
     private val pickImage = registerForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? -> uri?.let { processImage(it) } }
 
@@ -305,6 +304,12 @@ class MainActivity : AppCompatActivity() {
         fabScan.setOnClickListener { pickImage.launch("image/*") }
 
         switchTab(0)
+    }
+
+    private fun deleteExpense(exp: Expense) {
+        lifecycleScope.launch(Dispatchers.IO) {
+            db.expDao().delete(exp)
+        }
     }
 
     private fun switchTab(idx: Int) {
