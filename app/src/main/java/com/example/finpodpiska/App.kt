@@ -10,7 +10,6 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
-import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.widget.*
@@ -25,11 +24,6 @@ import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.ListAdapter
 import androidx.recyclerview.widget.RecyclerView
 import androidx.room.*
-import com.github.mikephil.charting.charts.BarChart
-import com.github.mikephil.charting.charts.PieChart
-import com.github.mikephil.charting.data.*
-import com.github.mikephil.charting.utils.ColorTemplate
-import com.google.android.material.floatingactionbutton.FloatingActionButton
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.text.TextRecognition
 import com.google.mlkit.vision.text.latin.TextRecognizerOptions
@@ -44,16 +38,10 @@ import kotlin.coroutines.resumeWithException
 
 // ===== ENUMS =====
 
-enum class Category(val emoji: String, val displayName: String, val color: Int) {
-    VIDEO("🎬", "Видео", 0xFFE53935.toInt()),
-    MUSIC("🎵", "Музыка", 0xFF8E24AA.toInt()),
-    GAMES("🎮", "Игры", 0xFF43A047.toInt()),
-    SOFTWARE("💻", "Софт", 0xFF1E88E5.toInt()),
-    EDUCATION("📚", "Образование", 0xFFFB8C00.toInt()),
-    NEWS("📰", "Новости", 0xFF6D4C41.toInt()),
-    CLOUD("☁️", "Облако", 0xFF00ACC1.toInt()),
-    FITNESS("💪", "Спорт", 0xFFD81B60.toInt()),
-    OTHER("📦", "Другое", 0xFF757575.toInt());
+enum class Category(val emoji: String, val displayName: String) {
+    VIDEO("🎬", "Видео"), MUSIC("🎵", "Музыка"), GAMES("🎮", "Игры"),
+    SOFTWARE("💻", "Софт"), EDUCATION("📚", "Образование"), NEWS("📰", "Новости"),
+    CLOUD("☁️", "Облако"), FITNESS("💪", "Спорт"), OTHER("📦", "Другое");
     companion object {
         fun fromName(n: String) = values().firstOrNull { it.name == n } ?: OTHER
         fun detect(text: String): Category {
@@ -139,10 +127,8 @@ interface SubDao {
     @Query("SELECT COUNT(*) FROM subscriptions WHERE status = 'ACTIVE'") fun activeCount(): LiveData<Int>
     @Query("SELECT * FROM subscriptions WHERE status = 'ACTIVE' AND renewal BETWEEN :from AND :to ORDER BY renewal") fun upcoming(from: Long, to: Long): LiveData<List<Sub>>
     @Query("SELECT category, SUM(amount / CASE period WHEN 'WEEK' THEN 0.23 WHEN 'MONTH' THEN 1.0 WHEN 'QUARTER' THEN 3.0 WHEN 'YEAR' THEN 12.0 END) as total FROM subscriptions WHERE status = 'ACTIVE' GROUP BY category") fun byCategory(): LiveData<List<CatTotal>>
-    @Query("SELECT currency, SUM(amount / CASE period WHEN 'WEEK' THEN 0.23 WHEN 'MONTH' THEN 1.0 WHEN 'QUARTER' THEN 3.0 WHEN 'YEAR' THEN 12.0 END) as total FROM subscriptions WHERE status = 'ACTIVE' GROUP BY currency") fun byCurrency(): LiveData<List<CurrTotal>>
     @Query("SELECT SUM(amount / CASE period WHEN 'WEEK' THEN 0.23 WHEN 'MONTH' THEN 1.0 WHEN 'QUARTER' THEN 3.0 WHEN 'YEAR' THEN 12.0 END) FROM subscriptions WHERE status = 'ACTIVE' AND priority = 'CANCELABLE'") fun savingsPotential(): LiveData<Double?>
     data class CatTotal(val category: String, val total: Double)
-    data class CurrTotal(val currency: String, val total: Double)
 }
 
 @Dao
@@ -150,8 +136,6 @@ interface ExpenseDao {
     @Insert suspend fun insert(e: Expense)
     @Delete suspend fun delete(e: Expense)
     @Query("SELECT * FROM expenses ORDER BY date DESC") fun all(): LiveData<List<Expense>>
-    @Query("SELECT card, SUM(amount) as total FROM expenses GROUP BY card") fun byCard(): LiveData<List<CardTotal>>
-    data class CardTotal(val card: String, val total: Double)
 }
 
 // ===== DATABASE =====
@@ -168,7 +152,7 @@ abstract class DB : RoomDatabase() {
     }
 }
 
-// ===== OCR (без .await()) =====
+// ===== OCR =====
 
 object OcrHelper {
     private val rec = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
@@ -177,15 +161,9 @@ object OcrHelper {
         try {
             val image = InputImage.fromFilePath(ctx, uri)
             rec.process(image)
-                .addOnSuccessListener { result ->
-                    if (cont.isActive) cont.resume(result.text)
-                }
-                .addOnFailureListener { e ->
-                    if (cont.isActive) cont.resumeWithException(e)
-                }
-        } catch (e: Exception) {
-            if (cont.isActive) cont.resumeWithException(e)
-        }
+                .addOnSuccessListener { result -> if (cont.isActive) cont.resume(result.text) }
+                .addOnFailureListener { e -> if (cont.isActive) cont.resumeWithException(e) }
+        } catch (e: Exception) { if (cont.isActive) cont.resumeWithException(e) }
     }
 
     data class Parsed(val name: String, val amount: Double?, val card: String?, val date: Long?, val category: String, val currency: String, val period: String)
@@ -222,148 +200,100 @@ class MainActivity : AppCompatActivity() {
     private val db by lazy { DB.get(this) }
     private val sdf = SimpleDateFormat("dd.MM.yyyy", Locale.getDefault())
 
-    private lateinit var screenHome: LinearLayout
-    private lateinit var screenSubs: LinearLayout
-    private lateinit var screenExp: LinearLayout
-    private lateinit var screenStats: LinearLayout
-    private lateinit var tabHome: TextView
-    private lateinit var tabSubs: TextView
-    private lateinit var tabExp: TextView
-    private lateinit var tabStats: TextView
-    private lateinit var tvTotal: TextView
-    private lateinit var tvYearly: TextView
-    private lateinit var tvCount: TextView
-    private lateinit var tvSavings: TextView
-    private lateinit var recyclerUpcoming: RecyclerView
-    private lateinit var tvNoUpcoming: TextView
-    private lateinit var recyclerSubs: RecyclerView
-    private lateinit var recyclerExp: RecyclerView
-    private lateinit var chartSubCats: PieChart
-    private lateinit var chartSubCurr: BarChart
-    private lateinit var chartExpCards: BarChart
-    private lateinit var fabAdd: FloatingActionButton
-    private lateinit var fabScan: FloatingActionButton
-
-    private val subAdapter = SubAdapter(onEdit = { sub: Sub -> showSubDialog(sub) }, onDelete = { sub: Sub -> deleteSub(sub) })
-    private val expAdapter = ExpAdapter(onDelete = { exp: Expense -> deleteExpense(exp) })
-
-    private val pickImage = registerForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? -> uri?.let { processImage(it) } }
-
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContentView(R.layout.activity_main)
+        
+        // Создаём UI программно — никаких XML проблем
+        val root = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
+            setBackgroundColor(0xFFF5F5F5.toInt())
+        }
 
-        screenHome = findViewById(R.id.screen_home)
-        screenSubs = findViewById(R.id.screen_subs)
-        screenExp = findViewById(R.id.screen_exp)
-        screenStats = findViewById(R.id.screen_stats)
-        tabHome = findViewById(R.id.tab_home)
-        tabSubs = findViewById(R.id.tab_subs)
-        tabExp = findViewById(R.id.tab_exp)
-        tabStats = findViewById(R.id.tab_stats)
-        tvTotal = findViewById(R.id.tv_total)
-        tvYearly = findViewById(R.id.tv_yearly)
-        tvCount = findViewById(R.id.tv_count)
-        tvSavings = findViewById(R.id.tv_savings)
-        recyclerUpcoming = findViewById(R.id.recycler_upcoming)
-        tvNoUpcoming = findViewById(R.id.tv_no_upcoming)
-        recyclerSubs = findViewById(R.id.recycler_subs)
-        recyclerExp = findViewById(R.id.recycler_exp)
-        chartSubCats = findViewById(R.id.chart_sub_cats)
-        chartSubCurr = findViewById(R.id.chart_sub_curr)
-        chartExpCards = findViewById(R.id.chart_exp_cards)
-        fabAdd = findViewById(R.id.fab_add)
-        fabScan = findViewById(R.id.fab_scan)
+        // Заголовок
+        val title = TextView(this).apply {
+            text = "💰 ФинПодписка"
+            textSize = 24f
+            setPadding(48, 48, 48, 32)
+        }
+        root.addView(title)
 
+        // Итоги
+        val summaryCard = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setBackgroundColor(0xFF1976D2.toInt())
+            setPadding(48, 48, 48, 48)
+            layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+                setMargins(32, 0, 32, 32)
+            }
+        }
+        val tvTotal = TextView(this).apply { text = "0 ₽/мес"; textSize = 32f; setTextColor(0xFFFFFFFF.toInt()) }
+        val tvYearly = TextView(this).apply { text = "0 ₽/год"; textSize = 16f; setTextColor(0xFFBBDEFB.toInt()); setPadding(0, 16, 0, 0) }
+        val tvCount = TextView(this).apply { text = "0 активных"; textSize = 14f; setTextColor(0xFFFFFFFF.toInt()); setPadding(0, 24, 0, 0) }
+        summaryCard.addView(tvTotal)
+        summaryCard.addView(tvYearly)
+        summaryCard.addView(tvCount)
+        root.addView(summaryCard)
+
+        // Кнопки
+        val btnRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+                setMargins(32, 0, 32, 32)
+            }
+        }
+        val btnAdd = Button(this).apply { text = "➕ Добавить"; layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { setMargins(0, 0, 16, 0) } }
+        val btnScan = Button(this).apply { text = "📷 Сканировать"; layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f) }
+        btnRow.addView(btnAdd)
+        btnRow.addView(btnScan)
+        root.addView(btnRow)
+
+        // Список
+        val tvLabel = TextView(this).apply { text = "Подписки:"; textSize = 18f; setPadding(48, 16, 48, 16) }
+        root.addView(tvLabel)
+
+        val recyclerView = RecyclerView(this).apply {
+            layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f).apply {
+                setMargins(16, 0, 16, 0)
+            }
+            layoutManager = LinearLayoutManager(this@MainActivity)
+        }
+        root.addView(recyclerView)
+
+        setContentView(root)
+
+        // Данные
         createNotificationChannel()
-
-        tabHome.setOnClickListener { switchTab(0) }
-        tabSubs.setOnClickListener { switchTab(1) }
-        tabExp.setOnClickListener { switchTab(2) }
-        tabStats.setOnClickListener { switchTab(3) }
 
         db.subDao().totalMonthly().observe(this) { total -> tvTotal.text = "${"%.0f".format(total ?: 0.0)} ₽/мес" }
         db.subDao().totalYearly().observe(this) { total -> tvYearly.text = "${"%.0f".format(total ?: 0.0)} ₽/год" }
         db.subDao().activeCount().observe(this) { count -> tvCount.text = "$count активных" }
-        db.subDao().savingsPotential().observe(this) { savings ->
-            val s = savings ?: 0.0
-            tvSavings.text = "💡 Можно сэкономить ${"%.0f".format(s)} ₽/мес"
-            tvSavings.visibility = if (s > 0) View.VISIBLE else View.GONE
-        }
 
-        val upcomingAdapter = SubAdapter(null, null)
-        recyclerUpcoming.layoutManager = LinearLayoutManager(this)
-        recyclerUpcoming.adapter = upcomingAdapter
-        val now = System.currentTimeMillis()
-        db.subDao().upcoming(now, now + 7L * 86400000L).observe(this) { list ->
-            upcomingAdapter.submitList(list)
-            tvNoUpcoming.visibility = if (list.isEmpty()) View.VISIBLE else View.GONE
-        }
+        val adapter = SubAdapter(
+            onEdit = { sub: Sub -> showSubDialog(sub) },
+            onDelete = { sub: Sub -> deleteSub(sub) }
+        )
+        recyclerView.adapter = adapter
+        db.subDao().all().observe(this) { list -> adapter.submitList(list) }
 
-        recyclerSubs.layoutManager = LinearLayoutManager(this)
-        recyclerSubs.adapter = subAdapter
-        db.subDao().all().observe(this) { list -> subAdapter.submitList(list) }
-
-        findViewById<Button>(R.id.chip_all).setOnClickListener { db.subDao().all().observe(this) { list -> subAdapter.submitList(list) } }
-        findViewById<Button>(R.id.chip_active).setOnClickListener { db.subDao().byStatus("ACTIVE").observe(this) { list -> subAdapter.submitList(list) } }
-        findViewById<Button>(R.id.chip_cancelled).setOnClickListener { db.subDao().byStatus("CANCELLED").observe(this) { list -> subAdapter.submitList(list) } }
-
-        recyclerExp.layoutManager = LinearLayoutManager(this)
-        recyclerExp.adapter = expAdapter
-        db.expDao().all().observe(this) { list -> expAdapter.submitList(list) }
-
-        setupStats()
-
-        fabAdd.setOnClickListener { showSubDialog(null) }
-        fabScan.setOnClickListener { pickImage.launch("image/*") }
-
-        switchTab(0)
+        btnAdd.setOnClickListener { showSubDialog(null) }
+        btnScan.setOnClickListener { pickImage.launch("image/*") }
     }
 
-    private fun deleteExpense(exp: Expense) {
-        lifecycleScope.launch(Dispatchers.IO) {
-            db.expDao().delete(exp)
-        }
-    }
-
-    private fun switchTab(idx: Int) {
-        screenHome.visibility = if (idx == 0) View.VISIBLE else View.GONE
-        screenSubs.visibility = if (idx == 1) View.VISIBLE else View.GONE
-        screenExp.visibility = if (idx == 2) View.VISIBLE else View.GONE
-        screenStats.visibility = if (idx == 3) View.VISIBLE else View.GONE
-        tabHome.alpha = if (idx == 0) 1f else 0.5f
-        tabSubs.alpha = if (idx == 1) 1f else 0.5f
-        tabExp.alpha = if (idx == 2) 1f else 0.5f
-        tabStats.alpha = if (idx == 3) 1f else 0.5f
-    }
-
-    private fun setupStats() {
-        db.subDao().byCategory().observe(this) { data ->
-            val entries = data.map { PieEntry(it.total.toFloat(), Category.fromName(it.category).emoji) }
-            val set = PieDataSet(entries, "Категории").apply { colors = data.map { Category.fromName(it.category).color } }
-            chartSubCats.data = PieData(set)
-            chartSubCats.invalidate()
-        }
-        db.subDao().byCurrency().observe(this) { data ->
-            val entries = data.map { BarEntry(0f, it.total.toFloat()) }
-            val set = BarDataSet(entries, "Валюты").apply { colors = ColorTemplate.MATERIAL_COLORS.toList() }
-            chartSubCurr.data = BarData(set)
-            chartSubCurr.invalidate()
-        }
-        db.expDao().byCard().observe(this) { data ->
-            val entries = data.map { BarEntry(0f, it.total.toFloat()) }
-            val set = BarDataSet(entries, "Картам").apply { colors = ColorTemplate.MATERIAL_COLORS.toList() }
-            chartExpCards.data = BarData(set)
-            chartExpCards.invalidate()
-        }
+    private val pickImage = registerForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
+        uri?.let { processImage(it) }
     }
 
     private fun processImage(uri: Uri) {
         lifecycleScope.launch {
-            val text = withContext(Dispatchers.IO) { OcrHelper.scan(this@MainActivity, uri) }
-            val r = OcrHelper.parse(text)
-            showSubDialog(null, r)
-            Toast.makeText(this@MainActivity, "Распознано: ${r.name}", Toast.LENGTH_SHORT).show()
+            try {
+                val text = withContext(Dispatchers.IO) { OcrHelper.scan(this@MainActivity, uri) }
+                val r = OcrHelper.parse(text)
+                showSubDialog(null, r)
+                Toast.makeText(this@MainActivity, "Распознано: ${r.name}", Toast.LENGTH_SHORT).show()
+            } catch (e: Exception) {
+                Toast.makeText(this@MainActivity, "Ошибка: ${e.message}", Toast.LENGTH_LONG).show()
+            }
         }
     }
 
@@ -379,8 +309,6 @@ class MainActivity : AppCompatActivity() {
         val etAmount = EditText(context).apply { hint = "Сумма"; setText(existing?.amount?.toString() ?: parsed?.amount?.toString() ?: ""); inputType = android.text.InputType.TYPE_CLASS_NUMBER or android.text.InputType.TYPE_NUMBER_FLAG_DECIMAL }
         val etCard = EditText(context).apply { hint = "Карта (4 цифры)"; setText(existing?.card ?: parsed?.card ?: ""); inputType = android.text.InputType.TYPE_CLASS_NUMBER }
         val etDate = EditText(context).apply { hint = "Дата продления (дд.мм.гггг)"; setText(sdf.format(Date(existing?.renewal ?: parsed?.date ?: System.currentTimeMillis()))) }
-        val etUrl = EditText(context).apply { hint = "URL"; setText(existing?.url ?: ""); inputType = android.text.InputType.TYPE_TEXT_VARIATION_URI }
-        val etNotes = EditText(context).apply { hint = "Заметки"; setText(existing?.notes ?: ""); minLines = 2 }
         val switchAutoRenew = Switch(context).apply { text = "Автопродление"; isChecked = existing?.autoRenew ?: true }
 
         val spinnerCurr = Spinner(context)
@@ -430,29 +358,16 @@ class MainActivity : AppCompatActivity() {
         addField(etAmount)
         addField(etCard)
         addField(etDate)
-
-        val currLabel = TextView(context).apply { text = "Валюта"; textSize = 12f }
-        addField(currLabel)
+        addField(TextView(context).apply { text = "Валюта"; textSize = 12f })
         addField(spinnerCurr, 4)
-
-        val perLabel = TextView(context).apply { text = "Период"; textSize = 12f }
-        addField(perLabel)
+        addField(TextView(context).apply { text = "Период"; textSize = 12f })
         addField(spinnerPeriod, 4)
-
-        val catLabel = TextView(context).apply { text = "Категория"; textSize = 12f }
-        addField(catLabel)
+        addField(TextView(context).apply { text = "Категория"; textSize = 12f })
         addField(spinnerCat, 4)
-
-        val statLabel = TextView(context).apply { text = "Статус"; textSize = 12f }
-        addField(statLabel)
+        addField(TextView(context).apply { text = "Статус"; textSize = 12f })
         addField(spinnerStatus, 4)
-
-        val prioLabel = TextView(context).apply { text = "Приоритет"; textSize = 12f }
-        addField(prioLabel)
+        addField(TextView(context).apply { text = "Приоритет"; textSize = 12f })
         addField(radioGroup, 4)
-
-        addField(etUrl)
-        addField(etNotes)
         addField(switchAutoRenew)
 
         scroll.addView(layout)
@@ -466,8 +381,6 @@ class MainActivity : AppCompatActivity() {
                 val amount = etAmount.text.toString().toDoubleOrNull() ?: return@setPositiveButton
                 val card = etCard.text.toString()
                 val date = parseDate(etDate.text.toString()) ?: return@setPositiveButton
-                val url = etUrl.text.toString()
-                val notes = etNotes.text.toString()
                 val autoRenew = switchAutoRenew.isChecked
 
                 val currency = Currency.values()[spinnerCurr.selectedItemPosition].code
@@ -481,7 +394,7 @@ class MainActivity : AppCompatActivity() {
                     else -> "NICE_TO_HAVE"
                 }
 
-                val sub = Sub(existing?.id ?: 0, name, amount, currency, period, card, existing?.startDate ?: System.currentTimeMillis(), date, category, status, priority, url, notes, autoRenew)
+                val sub = Sub(existing?.id ?: 0, name, amount, currency, period, card, existing?.startDate ?: System.currentTimeMillis(), date, category, status, priority, "", "", autoRenew)
                 lifecycleScope.launch(Dispatchers.IO) {
                     if (existing == null) { db.subDao().insert(sub); if (autoRenew) scheduleReminder(sub) }
                     else { db.subDao().update(sub); if (autoRenew) scheduleReminder(sub) else cancelReminder(sub.id) }
@@ -553,67 +466,22 @@ class MainActivity : AppCompatActivity() {
         override fun areContentsTheSame(a: Sub, b: Sub) = a == b
     }) {
         inner class VH(view: View) : RecyclerView.ViewHolder(view) {
-            val tvEmoji: TextView = view.findViewById(R.id.tv_emoji)
-            val tvName: TextView = view.findViewById(R.id.tv_name)
-            val tvAmount: TextView = view.findViewById(R.id.tv_amount)
-            val tvCategory: TextView = view.findViewById(R.id.tv_category)
-            val tvCard: TextView = view.findViewById(R.id.tv_card)
-            val tvDate: TextView = view.findViewById(R.id.tv_date)
-            val tvDays: TextView = view.findViewById(R.id.tv_days)
-            val btnEdit: Button = view.findViewById(R.id.btn_edit)
-            val btnDelete: Button = view.findViewById(R.id.btn_delete)
+            val tvName: TextView = view.findViewById(android.R.id.text1)
+            val tvDetails: TextView = view.findViewById(android.R.id.text2)
         }
         override fun onCreateViewHolder(p: ViewGroup, t: Int): VH {
-            val view = LayoutInflater.from(p.context).inflate(R.layout.item_sub, p, false)
+            val view = LayoutInflater.from(p.context).inflate(android.R.layout.simple_list_item_2, p, false)
             return VH(view)
         }
         override fun onBindViewHolder(h: VH, pos: Int) {
             val s = getItem(pos)
-            h.tvEmoji.text = s.cat().emoji
-            h.tvName.text = s.name
-            h.tvAmount.text = "${"%.0f".format(s.amount)} ${s.cur().symbol}/${s.per().displayName}"
-            h.tvCard.text = "Карта *${s.card.takeLast(4)}"
-            h.tvDate.text = "Списание: ${SimpleDateFormat("dd.MM.yyyy", Locale.getDefault()).format(Date(s.renewal))}"
-            val days = s.daysLeft()
-            h.tvDays.text = when {
-                s.stat() != Status.ACTIVE -> "${s.stat().emoji} ${s.stat().displayName}"
-                days < 0 -> "Просрочено"
-                days == 0L -> "⚠️ Сегодня"
-                days == 1L -> "⚠️ Завтра"
-                days <= 3 -> "Осталось $days дн."
-                else -> "Осталось $days дн."
+            h.tvName.text = "${s.cat().emoji} ${s.name}"
+            h.tvDetails.text = "${"%.0f".format(s.amount)} ${s.cur().symbol}/${s.per().displayName} • ${s.stat().emoji} ${s.prio().emoji}"
+            h.itemView.setOnClickListener { onEdit?.invoke(s) }
+            h.itemView.setOnLongClickListener { 
+                onDelete?.invoke(s)
+                true
             }
-            h.tvDays.setTextColor(when { days <= 1 -> 0xFFE53935.toInt(); days <= 3 -> 0xFFFF9800.toInt(); else -> 0xFF1976D2.toInt() })
-            h.tvCategory.text = "${s.cat().displayName} • ${s.prio().emoji}"
-            h.btnEdit.visibility = if (onEdit != null) View.VISIBLE else View.GONE
-            h.btnDelete.visibility = if (onDelete != null) View.VISIBLE else View.GONE
-            h.btnEdit.setOnClickListener { onEdit?.invoke(s) }
-            h.btnDelete.setOnClickListener { onDelete?.invoke(s) }
-        }
-    }
-
-    class ExpAdapter(private val onDelete: (Expense) -> Unit) : ListAdapter<Expense, ExpAdapter.VH>(object : DiffUtil.ItemCallback<Expense>() {
-        override fun areItemsTheSame(a: Expense, b: Expense) = a.id == b.id
-        override fun areContentsTheSame(a: Expense, b: Expense) = a == b
-    }) {
-        inner class VH(view: View) : RecyclerView.ViewHolder(view) {
-            val tvMerchant: TextView = view.findViewById(R.id.tv_merchant)
-            val tvAmount: TextView = view.findViewById(R.id.tv_amount)
-            val tvCard: TextView = view.findViewById(R.id.tv_card)
-            val tvDate: TextView = view.findViewById(R.id.tv_date)
-            val btnDelete: ImageButton = view.findViewById(R.id.btn_delete)
-        }
-        override fun onCreateViewHolder(p: ViewGroup, t: Int): VH {
-            val view = LayoutInflater.from(p.context).inflate(R.layout.item_exp, p, false)
-            return VH(view)
-        }
-        override fun onBindViewHolder(h: VH, pos: Int) {
-            val e = getItem(pos)
-            h.tvMerchant.text = e.merchant
-            h.tvAmount.text = "-${"%.0f".format(e.amount)} ₽"
-            h.tvCard.text = "Карта *${e.card.takeLast(4)}"
-            h.tvDate.text = SimpleDateFormat("dd.MM.yyyy", Locale.getDefault()).format(Date(e.date))
-            h.btnDelete.setOnClickListener { onDelete(e) }
         }
     }
 }
